@@ -7,13 +7,23 @@ import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { z, ZodError } from 'zod';
+import multer from 'multer';
+import sharp from 'sharp';
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
 const db = new PrismaClient();
 const app = express();
+const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 }, fileFilter: (_req,file,cb) =>
+  cb(null, ['image/jpeg','image/png','image/webp'].includes(file.mimetype))
+});
 app.disable('x-powered-by');
 app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') ?? false }));
 app.use(express.json({ limit: '32kb' }));
+app.use('/media', express.static(uploadsRoot, { immutable: true, maxAge: '7d', fallthrough: false }));
 app.use(rateLimit({ windowMs: 60_000, limit: 100, standardHeaders: 'draft-7', legacyHeaders: false }));
 const secret = process.env.JWT_SECRET;
 if (!secret || secret.length < 32) throw new Error('Set a JWT_SECRET of at least 32 characters');
@@ -32,13 +42,39 @@ const auth = (req: Authed, res: Response, next: NextFunction) => {
     next();
   } catch { res.status(401).json({ error: 'Invalid or expired session' }); }
 };
-const publicUser = { id: true, username: true, displayName: true, bio: true } as const;
+const publicUser = { id: true, username: true, displayName: true, bio: true, avatarUrl: true } as const;
 const postInclude = { author: { select: publicUser }, _count: { select: { likes: true, comments: true } } } as const;
 const credentials = z.object({ email: z.string().email().max(254).transform(s => s.toLowerCase()), password: z.string().min(10).max(128) });
 const register = credentials.extend({ username: z.string().regex(/^[a-zA-Z0-9_]{3,24}$/).transform(s => s.toLowerCase()), displayName: z.string().trim().min(1).max(80) });
 const issue = (id: string) => jwt.sign({}, jwtSecret, { algorithm: 'HS256', subject: id, expiresIn: '12h', issuer: 'rivonix-api' });
 
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'rivonix-api' }));
+
+// Local development media storage only. Deploy with managed object storage before production.
+app.post('/uploads/image', auth, photoUpload.single('image'), asyncRoute(async (req,res) => {
+  const file = req.file;
+  if (!file) { res.status(400).json({ error: 'JPEG, PNG or WebP image required (max 5 MB)' }); return; }
+  const purpose = z.enum(['post','avatar']).parse(req.body.purpose);
+  // Sharp decodes the actual bytes and re-encodes to WebP to avoid trusting MIME or embedded metadata.
+  const image = sharp(file.buffer, { failOn: 'error', limitInputPixels: 16_000_000 });
+  const info = await image.metadata();
+  if (!['jpeg','png','webp'].includes(info.format ?? '')) { res.status(400).json({error:'Unsupported image'}); return; }
+  const output = await image.rotate().resize({width: 1600,height:1600,fit:'inside',withoutEnlargement:true})
+    .webp({quality:82}).toBuffer();
+  const fileName = `${randomUUID()}.webp`;
+  await mkdir(uploadsRoot, {recursive: true});
+  await writeFile(path.join(uploadsRoot,fileName),output,{flag:'wx'});
+  const record = await db.uploadedMedia.create({data:{ ownerId:req.userId!, kind:purpose, fileName }});
+  res.status(201).json({mediaId:record.id,url:`/media/${fileName}`});
+}));
+app.patch('/me/avatar',auth,asyncRoute(async(req,res)=>{
+  const {mediaId}=z.object({mediaId:z.string().cuid()}).parse(req.body);
+  const media=await db.uploadedMedia.findFirst({where:{id:mediaId,ownerId:req.userId!,kind:'avatar'}});
+  if (!media) {res.status(400).json({error:'Avatar upload not found'});return;}
+  const user=await db.user.update({where:{id:req.userId!},data:{avatarUrl:`/media/${media.fileName}`},select:publicUser});
+  res.json(user);
+}));
+
 app.post('/auth/register', asyncRoute(async (req,res) => {
   const input = register.parse(req.body);
   const user = await db.user.create({ data: { email: input.email, username: input.username, displayName: input.displayName, passwordHash: await argon2.hash(input.password) }, select: publicUser });
@@ -48,7 +84,7 @@ app.post('/auth/login', asyncRoute(async (req,res) => {
   const input = credentials.parse(req.body);
   const user = await db.user.findUnique({ where: { email: input.email } });
   if (!user || !(await argon2.verify(user.passwordHash,input.password))) { res.status(401).json({ error: 'Invalid email or password' }); return; }
-  res.json({ token: issue(user.id), user: { id: user.id, username: user.username, displayName: user.displayName, bio: user.bio } });
+  res.json({ token: issue(user.id), user: { id: user.id, username: user.username, displayName: user.displayName, bio: user.bio, avatarUrl: user.avatarUrl } });
 }));
 app.get('/me', auth, asyncRoute(async (req,res) => {
   const user = await db.user.findUnique({ where: { id: req.userId! }, select: publicUser });
@@ -68,8 +104,15 @@ app.get('/posts', asyncRoute(async (req,res) => {
   res.json({ items, nextCursor: hasMore ? items[items.length-1]?.id : null });
 }));
 app.post('/posts', auth, asyncRoute(async (req,res) => {
-  const { text } = z.object({ text: z.string().trim().min(1).max(2000) }).parse(req.body);
-  const post = await db.post.create({ data: { text, authorId: req.userId! }, include: postInclude });
+  const input = z.object({ text: z.string().trim().max(2000).default(''), mediaId: z.string().cuid().optional() }).parse(req.body);
+  if (!input.text && !input.mediaId) {res.status(400).json({error:'Text or an image is required'});return;}
+  let imageUrl: string | undefined;
+  if (input.mediaId) {
+    const media = await db.uploadedMedia.findFirst({where:{id:input.mediaId,ownerId:req.userId!,kind:'post'}});
+    if (!media) {res.status(400).json({error:'Image upload not found'});return;}
+    imageUrl = `/media/${media.fileName}`;
+  }
+  const post = await db.post.create({ data: { text: input.text, imageUrl, authorId: req.userId! }, include: postInclude });
   res.status(201).json(post);
 }));
 app.post('/posts/:id/likes', auth, asyncRoute(async (req,res) => {
@@ -121,6 +164,7 @@ app.delete('/users/:id/follow', auth, asyncRoute(async (req,res) => {
   await db.follow.deleteMany({ where: { followerId: req.userId!, followingId: req.params.id } }); res.status(204).end();
 }));
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof multer.MulterError) { res.status(400).json({error:'Image upload rejected: '+err.code});return; }
   if (err instanceof ZodError) { res.status(400).json({error:'Invalid input',details:err.flatten()});return; }
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') { res.status(409).json({error:'Email or username already taken'});return; }
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') { res.status(404).json({error:'Resource not found'});return; }
