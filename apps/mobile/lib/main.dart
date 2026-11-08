@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'social_features.dart';
 import 'media_features.dart';
 import 'video_features.dart';
+import 'live_features.dart';
 import 'package:image_picker/image_picker.dart';
 
 const violet = Color(0xFF8B5CF6);
@@ -82,7 +83,7 @@ class _ShellState extends State<Shell> {
  final labels=const ['Home','Explore','LIVE','Alerts','Profile'];
  @override Widget build(BuildContext context)=>Scaffold(
    appBar:AppBar(title:Text(index==0?'RIVONIX':labels[index],style:const TextStyle(fontWeight:FontWeight.bold,letterSpacing:2))),
-   body:IndexedStack(index:index,children:[Feed(api:widget.api),ExploreScreen(api:widget.api),const PlaceholderScreen(icon:Icons.live_tv,title:'LIVE',subtitle:'Agora streaming is not connected yet.'),const PlaceholderScreen(icon:Icons.notifications,title:'Notifications',subtitle:'Real-time notifications are not connected yet.'),Profile(api:widget.api,onLogout:widget.onLogout)]),
+   body:IndexedStack(index:index,children:[Feed(api:widget.api),ExploreScreen(api:widget.api),LiveLobby(api:widget.api),const PlaceholderScreen(icon:Icons.notifications,title:'Notifications',subtitle:'Real-time notifications are not connected yet.'),Profile(api:widget.api,onLogout:widget.onLogout)]),
    bottomNavigationBar:NavigationBar(selectedIndex:index,onDestinationSelected:(i)=>setState(()=>index=i),destinations:const [
      NavigationDestination(icon:Icon(Icons.home_outlined),selectedIcon:Icon(Icons.home),label:'Home'),
      NavigationDestination(icon:Icon(Icons.search),label:'Explore'),
