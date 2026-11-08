@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rivonix
+      POSTGRES_USER: rivonix
+      POSTGRES_PASSWORD: local_dev_only
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - rivonix_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rivonix"]
+      interval: 5s
+      retries: 10
+volumes:
+  rivonix_db:
