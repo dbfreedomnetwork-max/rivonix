@@ -92,6 +92,19 @@ app.post('/posts/:id/comments', auth, asyncRoute(async (req,res) => {
   const comment = await db.comment.create({ data: { text, postId: req.params.id, authorId: req.userId! }, include: { author: { select: publicUser } } });
   res.status(201).json(comment);
 }));
+app.get('/users/search', asyncRoute(async (req,res) => {
+  const { q } = z.object({ q: z.string().trim().min(1).max(80) }).parse(req.query);
+  const users = await db.user.findMany({
+    where: { OR: [
+      { username: { contains: q, mode: 'insensitive' } },
+      { displayName: { contains: q, mode: 'insensitive' } }
+    ] },
+    select: publicUser,
+    orderBy: { username: 'asc' },
+    take: 20
+  });
+  res.json({ items: users });
+}));
 app.get('/users/:username', asyncRoute(async (req,res) => {
   const user = await db.user.findUnique({ where: { username: req.params.username.toLowerCase() }, select: { ...publicUser, _count: { select: { posts: true, followers: true, following: true } } } });
   if (!user) { res.status(404).json({ error: 'User not found' }); return; }
