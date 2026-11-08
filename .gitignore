@@ -4,3 +4,6 @@ node_modules/
 !.env.example
 .dart_tool/
 build/
+
+# Local-only media files (never commit user uploads)
+apps/api/uploads/
