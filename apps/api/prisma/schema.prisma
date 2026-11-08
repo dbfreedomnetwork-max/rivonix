@@ -19,6 +19,8 @@ model User {
   likes       Like[]
   following   Follow[]  @relation("following")
   followers   Follow[]  @relation("followers")
+  hostedRooms LiveRoom[] @relation("liveHosts")
+  liveMembers LiveParticipant[]
 }
 model Post {
   id        String    @id @default(cuid())
@@ -64,4 +66,34 @@ model UploadedMedia {
   fileName  String   @unique
   createdAt DateTime @default(now())
   @@index([ownerId, createdAt])
+}
+
+enum LiveRoomStatus {
+  LIVE
+  ENDED
+}
+
+model LiveRoom {
+  id         String         @id @default(cuid())
+  channel    String         @unique
+  title      String         @db.VarChar(120)
+  status     LiveRoomStatus @default(LIVE)
+  hostId     String
+  host       User           @relation("liveHosts", fields: [hostId], references: [id], onDelete: Cascade)
+  startedAt  DateTime       @default(now())
+  endedAt    DateTime?
+  participants LiveParticipant[]
+  @@index([status, startedAt])
+  @@index([hostId, status])
+}
+
+model LiveParticipant {
+  roomId     String
+  userId     String
+  agoraUid   Int
+  joinedAt   DateTime @default(now())
+  room       LiveRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([roomId, userId])
+  @@unique([roomId, agoraUid])
 }
