@@ -24,6 +24,7 @@ model Post {
   id        String    @id @default(cuid())
   text      String    @default("") @db.VarChar(2000)
   imageUrl  String?
+  videoUrl  String?
   createdAt DateTime  @default(now())
   authorId  String
   author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
