@@ -12,6 +12,7 @@ model User {
   username    String    @unique
   displayName String
   bio         String    @default("")
+  avatarUrl   String?
   createdAt   DateTime  @default(now())
   posts       Post[]
   comments    Comment[]
@@ -21,7 +22,8 @@ model User {
 }
 model Post {
   id        String    @id @default(cuid())
-  text      String    @db.VarChar(2000)
+  text      String    @default("") @db.VarChar(2000)
+  imageUrl  String?
   createdAt DateTime  @default(now())
   authorId  String
   author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
@@ -52,4 +54,13 @@ model Follow {
   follower User @relation("following", fields: [followerId], references: [id], onDelete: Cascade)
   following User @relation("followers", fields: [followingId], references: [id], onDelete: Cascade)
   @@id([followerId, followingId])
+}
+
+model UploadedMedia {
+  id        String   @id @default(cuid())
+  ownerId   String
+  kind      String
+  fileName  String   @unique
+  createdAt DateTime @default(now())
+  @@index([ownerId, createdAt])
 }
