@@ -10,8 +10,9 @@ import { z, ZodError } from 'zod';
 import multer from 'multer';
 import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { createReadStream } from 'node:fs';
 
 const db = new PrismaClient();
 const app = express();
@@ -67,6 +68,34 @@ app.post('/uploads/image', auth, photoUpload.single('image'), asyncRoute(async (
   const record = await db.uploadedMedia.create({data:{ ownerId:req.userId!, kind:purpose, fileName }});
   res.status(201).json({mediaId:record.id,url:`/media/${fileName}`});
 }));
+// Development-only local uploads: 25 MiB MP4 maximum. No transcoding or virus scanner.
+const videoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, done) => { void mkdir(uploadsRoot,{recursive:true}).then(()=>done(null,uploadsRoot),done); },
+    filename: (_req, _file, done) => done(null, randomUUID()+'.mp4')
+  }),
+  limits: {fileSize:25*1024*1024, files:1},
+  fileFilter: (_req,file,done) => done(null,file.mimetype === 'video/mp4')
+});
+app.post('/uploads/video',auth,videoUpload.single('video'),asyncRoute(async(req,res)=>{
+  const uploaded=req.file;
+  if (!uploaded) {res.status(400).json({error:'MP4 video required (max 25 MB)'});return;}
+  try {
+    // MP4 ISO base media files normally have 'ftyp' at byte offset four.
+    const fh=createReadStream(uploaded.path,{start:0,end:11});
+    const chunks:Buffer[]=[];
+    for await (const chunk of fh) chunks.push(Buffer.from(chunk));
+    const header=Buffer.concat(chunks);
+    if(header.length < 12 || header.toString('ascii',4,8)!=='ftyp'){
+      res.status(400).json({error:'Invalid MP4 container'});return;
+    }
+    const media=await db.uploadedMedia.create({data:{ownerId:req.userId!,kind:'video',fileName:uploaded.filename}});
+    res.status(201).json({mediaId:media.id,url:`/media/${media.fileName}`});
+  } finally {
+    if (!res.headersSent || res.statusCode >= 400) await unlink(uploaded.path).catch(()=>{});
+  }
+}));
+
 app.patch('/me/avatar',auth,asyncRoute(async(req,res)=>{
   const {mediaId}=z.object({mediaId:z.string().cuid()}).parse(req.body);
   const media=await db.uploadedMedia.findFirst({where:{id:mediaId,ownerId:req.userId!,kind:'avatar'}});
@@ -103,16 +132,36 @@ app.get('/posts', asyncRoute(async (req,res) => {
   const items = posts.slice(0,input.limit);
   res.json({ items, nextCursor: hasMore ? items[items.length-1]?.id : null });
 }));
+app.get('/reels',asyncRoute(async(req,res)=>{
+  const query=z.object({cursor:z.string().optional(),limit:z.coerce.number().int().min(1).max(20).default(12)}).parse(req.query);
+  const videos=await db.post.findMany({
+    where:{videoUrl:{not:null}},
+    orderBy:[{createdAt:'desc'},{id:'desc'}],
+    take:query.limit+1,
+    ...(query.cursor?{cursor:{id:query.cursor},skip:1}:{}),
+    include:postInclude,
+  });
+  const items=videos.slice(0,query.limit);
+  res.json({items,nextCursor:videos.length>query.limit?items.at(-1)?.id:null});
+}));
+
 app.post('/posts', auth, asyncRoute(async (req,res) => {
-  const input = z.object({ text: z.string().trim().max(2000).default(''), mediaId: z.string().cuid().optional() }).parse(req.body);
-  if (!input.text && !input.mediaId) {res.status(400).json({error:'Text or an image is required'});return;}
+  const input = z.object({ text: z.string().trim().max(2000).default(''), mediaId: z.string().cuid().optional(), videoMediaId: z.string().cuid().optional() }).parse(req.body);
+  if (!input.text && !input.mediaId && !input.videoMediaId) {res.status(400).json({error:'Text or media required'});return;}
+  if (input.mediaId && input.videoMediaId) {res.status(400).json({error:'Select either an image or video'});return;}
   let imageUrl: string | undefined;
   if (input.mediaId) {
     const media = await db.uploadedMedia.findFirst({where:{id:input.mediaId,ownerId:req.userId!,kind:'post'}});
     if (!media) {res.status(400).json({error:'Image upload not found'});return;}
     imageUrl = `/media/${media.fileName}`;
   }
-  const post = await db.post.create({ data: { text: input.text, imageUrl, authorId: req.userId! }, include: postInclude });
+  let videoUrl: string | undefined;
+  if (input.videoMediaId) {
+    const media=await db.uploadedMedia.findFirst({where:{id:input.videoMediaId,ownerId:req.userId!,kind:'video'}});
+    if(!media){res.status(400).json({error:'Video upload not found'});return;}
+    videoUrl=`/media/${media.fileName}`;
+  }
+  const post = await db.post.create({ data: { text: input.text, imageUrl, videoUrl, authorId: req.userId! }, include: postInclude });
   res.status(201).json(post);
 }));
 app.post('/posts/:id/likes', auth, asyncRoute(async (req,res) => {
