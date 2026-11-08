@@ -21,6 +21,7 @@ model User {
   followers   Follow[]  @relation("followers")
   hostedRooms LiveRoom[] @relation("liveHosts")
   liveMembers LiveParticipant[]
+  liveMessages LiveMessage[]
 }
 model Post {
   id        String    @id @default(cuid())
@@ -83,6 +84,7 @@ model LiveRoom {
   startedAt  DateTime       @default(now())
   endedAt    DateTime?
   participants LiveParticipant[]
+  messages LiveMessage[]
   @@index([status, startedAt])
   @@index([hostId, status])
 }
@@ -96,4 +98,15 @@ model LiveParticipant {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@id([roomId, userId])
   @@unique([roomId, agoraUid])
+}
+
+model LiveMessage {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  text      String   @db.VarChar(250)
+  createdAt DateTime @default(now())
+  room      LiveRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([roomId, createdAt])
 }
