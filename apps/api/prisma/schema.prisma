@@ -5,7 +5,13 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+enum UserRole {
+  USER
+  ADMIN
+}
+
 model User {
+  role        UserRole @default(USER)
   id          String    @id @default(cuid())
   email       String    @unique
   passwordHash String
@@ -147,14 +153,25 @@ model LiveRoomBan {
   @@id([roomId,userId])
 }
 
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  DISMISSED
+}
+
 model LiveReport {
   id String @id @default(cuid())
   roomId String
   reporterId String
   subjectId String?
   reason String @db.VarChar(250)
+  status ReportStatus @default(OPEN)
+  reviewNote String? @db.VarChar(1000)
+  reviewedById String?
+  reviewedAt DateTime?
   createdAt DateTime @default(now())
   room LiveRoom @relation(fields:[roomId],references:[id],onDelete:Cascade)
   @@index([roomId,createdAt])
   @@index([subjectId,createdAt])
+  @@index([status,createdAt])
 }
