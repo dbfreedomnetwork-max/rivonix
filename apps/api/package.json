@@ -9,7 +9,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "test": "node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
