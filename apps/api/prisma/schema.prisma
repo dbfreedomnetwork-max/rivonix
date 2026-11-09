@@ -175,3 +175,88 @@ model LiveReport {
   @@index([subjectId,createdAt])
   @@index([status,createdAt])
 }
+
+/*
+ * PRE-REVENUE DEMO ECONOMY: all values are internal, non-redeemable points.
+ * No purchased coins, cash value, payout or withdrawal is implemented.
+ */
+model RivoWallet {
+  userId       String @id
+  coins        Int    @default(0)
+  creatorPoints Int   @default(0)
+  agencyPoints Int    @default(0)
+  updatedAt    DateTime @updatedAt
+}
+
+model RivoLedgerEntry {
+  id          String   @id @default(cuid())
+  userId      String
+  walletType  String
+  delta       Int
+  kind        String
+  operationId String
+  createdAt   DateTime @default(now())
+  @@unique([userId, walletType, operationId])
+  @@index([userId, createdAt])
+}
+
+model RivoGift {
+  id             String @id @default(cuid())
+  senderId       String
+  recipientId    String
+  roomId         String
+  giftCode       String
+  costCoins      Int
+  creatorPoints  Int
+  agencyPoints   Int
+  platformPoints Int
+  agencyId       String?
+  battleId       String?
+  idempotencyKey String
+  createdAt      DateTime @default(now())
+  @@unique([senderId, idempotencyKey])
+  @@index([roomId, createdAt])
+  @@index([recipientId, createdAt])
+}
+
+enum RivoBattleStatus {
+  ACTIVE
+  ENDED
+}
+
+model RivoBattle {
+  id         String @id @default(cuid())
+  roomId     String
+  hostId     String
+  guestId    String
+  hostScore  Int @default(0)
+  guestScore Int @default(0)
+  status     RivoBattleStatus @default(ACTIVE)
+  startedAt  DateTime @default(now())
+  endsAt     DateTime
+  endedAt    DateTime?
+  @@index([roomId, status])
+}
+
+model RivoAgency {
+  id        String @id @default(cuid())
+  ownerId   String
+  name      String @db.VarChar(100)
+  createdAt DateTime @default(now())
+  members   RivoAgencyMember[]
+  @@index([ownerId])
+}
+
+enum RivoAgencyMemberStatus {
+  INVITED
+  ACTIVE
+}
+
+model RivoAgencyMember {
+  creatorId String @id
+  agencyId  String
+  status    RivoAgencyMemberStatus @default(INVITED)
+  joinedAt  DateTime?
+  agency    RivoAgency @relation(fields:[agencyId],references:[id],onDelete:Cascade)
+  @@index([agencyId,status])
+}
