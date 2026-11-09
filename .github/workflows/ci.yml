@@ -1,30 +1,67 @@
-name: CI
+name: Rivonix CI
+
 on:
   push:
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rivonix-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   api:
+    name: API typecheck, tests and build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/api
+    env:
+      DATABASE_URL: postgresql://rivonix:dev_only@localhost:5432/rivonix?schema=public
+      JWT_SECRET: ci-test-not-for-production-1234567890abcdef
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - run: npm ci
+      - run: npx prisma validate
       - run: npx prisma generate
       - run: npm run typecheck
       - run: npm test
-  mobile:
+      - run: npm run build
+
+  flutter:
+    name: Flutter analyze, test and Android debug build
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: apps/mobile
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - working-directory: apps/mobile
-        run: flutter pub get
-      - working-directory: apps/mobile
-        run: flutter analyze
+          cache: true
+      # Native platform shells are not currently tracked in Git.
+      - name: Generate Android and iOS project shells
+        run: flutter create --project-name rivonix --platforms=android,ios .
+      - name: Apply required native permissions
+        run: bash ../../scripts/configure_mobile_permissions.sh
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Compile debug Android APK
+        run: flutter build apk --debug --dart-define=API_BASE_URL=https://example.invalid
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rivonix-debug-apk
+          path: apps/mobile/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 5
+          if-no-files-found: error
