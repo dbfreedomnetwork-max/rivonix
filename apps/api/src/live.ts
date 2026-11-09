@@ -3,6 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import { RtcRole, RtcTokenBuilder } from 'agora-token';
 import { randomBytes, randomInt } from 'node:crypto';
 import { z } from 'zod';
+import { canPublish } from './live_policy.js';
 
 type Authed = Request & { userId?: string };
 type AsyncRoute = (handler: (req: Authed, res: Response) => Promise<void>) => RequestHandler;
@@ -80,16 +81,16 @@ export function registerLiveRoutes(app: Express, db: PrismaClient, auth: Auth, a
       where:{roomId_userId:{roomId:room.id,userId:req.userId!}},
       select:{status:true,seatNumber:true}
     });
-    const canPublish = isHost || (guestSeat?.status === 'ACTIVE' && guestSeat.seatNumber !== null);
+    const allowedToPublish = canPublish(room.hostId,req.userId!,false,guestSeat?.status ?? null,guestSeat?.seatNumber ?? null);
     const expireAt = Math.floor(Date.now() / 1000) + TTL_SECONDS;
     const rtcToken = RtcTokenBuilder.buildTokenWithUid(
       credentials.appId, credentials.cert, room.channel, member.agoraUid,
-      canPublish ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER, expireAt, expireAt,
+      allowedToPublish ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER, expireAt, expireAt,
     );
     res.json({
       appId: credentials.appId, channel: room.channel, uid: member.agoraUid,
       token: rtcToken, expiresAt: expireAt,
-      role: isHost ? 'host' : canPublish ? 'guest' : 'audience',
+      role: isHost ? 'host' : allowedToPublish ? 'guest' : 'audience',
     });
   }));
 
