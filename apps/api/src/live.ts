@@ -109,9 +109,13 @@ export function registerLiveRoutes(app: Express, db: PrismaClient, auth: Auth, a
   }));
 
   // REST polling chat is a development baseline, not a high-volume realtime service.
-  app.get('/live/rooms/:id/messages', asyncRoute(async (req, res) => {
+  app.get('/live/rooms/:id/messages', auth, asyncRoute(async (req, res) => {
     const room = await db.liveRoom.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!room) { res.status(404).json({ error: 'LIVE room not found' }); return; }
+    const member=await db.liveParticipant.findUnique({where:{roomId_userId:{roomId:req.params.id,userId:req.userId!}}});
+    if(!member){res.status(403).json({error:'Join the room to read chat'});return;}
+    const banned=await db.liveRoomBan.findUnique({where:{roomId_userId:{roomId:req.params.id,userId:req.userId!}}});
+    if(banned){res.status(403).json({error:'Removed from LIVE room'});return;}
     const items = await db.liveMessage.findMany({
       where: { roomId: room.id }, take: 50, orderBy: { createdAt: 'desc' },
       include: { user: { select: hostSelect } },
