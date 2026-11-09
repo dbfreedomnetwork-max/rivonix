@@ -1,14 +1,11 @@
 import type { Express, NextFunction, Request, RequestHandler, Response } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { canReviewReports } from './admin_policy.js';
 
 type Authed = Request & { userId?: string };
 type AsyncRoute = (handler: (req: Authed, res: Response) => Promise<void>) => RequestHandler;
 type Auth = (req: Authed, res: Response, next: NextFunction) => void;
-
-export function canReviewReports(role: string): boolean {
-  return role === 'ADMIN';
-}
 
 export function registerAdminRoutes(app: Express, db: PrismaClient, auth: Auth, asyncRoute: AsyncRoute) {
   // Verify role from the database every request; JWTs never carry trusted admin privileges.
