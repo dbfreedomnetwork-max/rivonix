@@ -27,9 +27,10 @@ function respondSeatError(error: unknown, res: Response): boolean {
   if (error instanceof SeatError) { res.status(error.status).json({error:error.message}); return true; }
   return false;
 }
-async function activeRoom(db: PrismaClient, roomId: string) {
+async function activeRoom(db: PrismaClient, roomId: string, userId?: string) {
   const room = await db.liveRoom.findUnique({where:{id:roomId}});
   if (!room || room.status !== 'LIVE') throw new SeatError(404,'LIVE room unavailable');
+  if(userId && await db.liveRoomBan.findUnique({where:{roomId_userId:{roomId,userId}}})) throw new SeatError(403,'Removed from this room');
   return room;
 }
 async function activate(tx: Prisma.TransactionClient, roomId: string, userId: string) {
@@ -48,7 +49,7 @@ async function activate(tx: Prisma.TransactionClient, roomId: string, userId: st
 export function registerSeatRoutes(app: Express, db: PrismaClient, auth: Auth, asyncRoute: AsyncRoute) {
   app.get('/live/rooms/:id/seats', auth, asyncRoute(async(req,res)=>{
     try {
-      const room = await activeRoom(db,req.params.id);
+      const room = await activeRoom(db,req.params.id,req.userId!);
       const seats = await db.liveGuestSeat.findMany({
         where:{roomId:room.id,OR:[{status:'ACTIVE'},{userId:req.userId!},...(room.hostId===req.userId ? [{status:'REQUESTED' as const},{status:'INVITED' as const}] : [])]},
         include:seatInclude,orderBy:[{seatNumber:'asc'},{createdAt:'asc'}]
@@ -60,7 +61,7 @@ export function registerSeatRoutes(app: Express, db: PrismaClient, auth: Auth, a
   // Audience member opts in to a guest seat. Host can approve; no auto-publishing.
   app.post('/live/rooms/:id/seats/request',auth,asyncRoute(async(req,res)=>{
     try{
-      const room=await activeRoom(db,req.params.id);
+      const room=await activeRoom(db,req.params.id,req.userId!);
       if(room.hostId===req.userId)throw new SeatError(400,'Host already broadcasts');
       const member=await db.liveParticipant.findUnique({where:{roomId_userId:{roomId:room.id,userId:req.userId!}}});
       if(!member)throw new SeatError(403,'Join the room first');
@@ -81,11 +82,12 @@ export function registerSeatRoutes(app: Express, db: PrismaClient, auth: Auth, a
   app.post('/live/rooms/:id/seats/invite',auth,asyncRoute(async(req,res)=>{
     try{
       const {userId}=z.object({userId:z.string().cuid()}).parse(req.body);
-      const room=await activeRoom(db,req.params.id);
+      const room=await activeRoom(db,req.params.id,req.userId!);
       if(room.hostId!==req.userId)throw new SeatError(403,'Only the host can invite guests');
       if(userId===room.hostId)throw new SeatError(400,'Cannot invite host');
       const member=await db.liveParticipant.findUnique({where:{roomId_userId:{roomId:room.id,userId}}});
       if(!member)throw new SeatError(404,'User has not joined this room');
+      if(await db.liveRoomBan.findUnique({where:{roomId_userId:{roomId:room.id,userId}}})) throw new SeatError(403,'Viewer is banned');
       const seat=await withSeatTransaction(db,async tx=>{
         const old=await tx.liveGuestSeat.findUnique({where:{roomId_userId:{roomId:room.id,userId}}});
         if(old?.status==='ACTIVE')return old;
@@ -102,8 +104,9 @@ export function registerSeatRoutes(app: Express, db: PrismaClient, auth: Auth, a
   // Host approves a requested seat; host approval is consent to the user's existing request.
   app.post('/live/rooms/:id/seats/:userId/approve',auth,asyncRoute(async(req,res)=>{
     try {
-      const room=await activeRoom(db,req.params.id);
+      const room=await activeRoom(db,req.params.id,req.userId!);
       if(room.hostId!==req.userId)throw new SeatError(403,'Host only');
+      if(await db.liveRoomBan.findUnique({where:{roomId_userId:{roomId:room.id,userId:req.params.userId}}})) throw new SeatError(403,'Viewer is banned');
       const seat=await withSeatTransaction(db,async tx=>{
         const current=await tx.liveGuestSeat.findUnique({where:{roomId_userId:{roomId:room.id,userId:req.params.userId}}});
         if(!current || current.status!=='REQUESTED')throw new SeatError(409,'No pending seat request');
@@ -116,7 +119,7 @@ export function registerSeatRoutes(app: Express, db: PrismaClient, auth: Auth, a
   // Invitee consents to publish by accepting the host's invitation.
   app.post('/live/rooms/:id/seats/accept',auth,asyncRoute(async(req,res)=>{
     try{
-      const room=await activeRoom(db,req.params.id);
+      const room=await activeRoom(db,req.params.id,req.userId!);
       const seat=await withSeatTransaction(db,async tx=>{
         const current=await tx.liveGuestSeat.findUnique({where:{roomId_userId:{roomId:room.id,userId:req.userId!}}});
         if(!current || current.status!=='INVITED')throw new SeatError(409,'No pending invitation');
@@ -129,7 +132,7 @@ export function registerSeatRoutes(app: Express, db: PrismaClient, auth: Auth, a
   // Guest can leave; host can remove a guest or reject a pending request.
   app.delete('/live/rooms/:id/seats/:userId',auth,asyncRoute(async(req,res)=>{
     try{
-      const room=await activeRoom(db,req.params.id);
+      const room=await activeRoom(db,req.params.id,req.userId!);
       if(room.hostId!==req.userId && req.userId!==req.params.userId)throw new SeatError(403,'Not permitted');
       await db.liveGuestSeat.updateMany({
         where:{roomId:room.id,userId:req.params.userId},
