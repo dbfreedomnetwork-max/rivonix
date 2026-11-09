@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'main.dart';
 import 'live_seats.dart';
 import 'live_moderation.dart';
+import 'rivo_economy.dart';
 
 class LiveLobby extends StatefulWidget {
   const LiveLobby({super.key, required this.api});
@@ -240,6 +241,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       if(currentUserId!=null)LiveSeatsPanel(api:widget.api,roomId:id,host:host,
         currentUserId:currentUserId!,onSeatChanged:syncSeatRole),
       LiveModerationPanel(api:widget.api,roomId:id,isHost:host),
+      RivoLiveGifts(api:widget.api,roomId:id,hostId:widget.room['hostId'] as String),
       const Padding(padding:EdgeInsets.all(6),child:Text('Chat (refreshes every 4 seconds)')),
       Expanded(flex:2,child:ListView.builder(itemCount:messages.length,itemBuilder:(ctx,i){
         final m=messages[i] as Map<String,dynamic>;final u=m['user'] as Map<String,dynamic>;
