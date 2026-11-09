@@ -166,8 +166,6 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
             state['banned']==true?'You were removed from this room':'LIVE has ended')));
           Navigator.of(context).pop();
         }
-      }else if(!host) {
-        await syncSeatRole();
       }
     }catch(_) {
       // A network error is not evidence of a ban or completed broadcast.
