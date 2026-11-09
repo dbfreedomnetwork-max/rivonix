@@ -16,8 +16,14 @@ Fresh codebase, **no SayHi source, APIs, dependencies or assets**.
 4. In `apps/mobile` run `flutter pub get`, then `flutter run --dart-define=API_BASE_URL=http://10.0.2.2:4000` for Android emulator. On iOS Simulator use `http://localhost:4000`; physical devices need a reachable host. Use HTTPS in production.
 5. Validate: `npm run typecheck` from `apps/api`, and `flutter analyze` from `apps/mobile`.
 
-## Status
-This is a source-code starter, **not** a finished or production-tested app. The LIVE, Explore and Notifications tabs are placeholders. No Agora RTC integration, messages, gift wallets, payouts, moderation, or verification flows have been completed. Platform shells, dependency installation, database migrations, device builds, and end-to-end tests still need to be run.
+## Current development state
+
+Phases 1–8 now have source-code implementations for social feeds, images, MP4 Reels, Agora LIVE rooms, guest-seat requests, report submission, and administrator report review. The Notifications tab remains a placeholder. The project is **not a verified production-ready app**.
+
+Phase 9 adds an automated CI workflow that attempts an API build and Android debug APK build alongside static analysis and tests. No passing CI runs or device builds have yet been confirmed. Native Android/iOS shells are generated rather than committed; migrations and dependency lockfiles must be reviewed and finalized.
+
+**Development validation guide:** [Phase 9 build and testing](docs/PHASE9_BUILD_VALIDATION.md). Earlier phase setup guides are in [docs](docs).
+
 
 ## Security
 The development database credentials in `docker-compose.yml` and `.env.example` are local-only examples. Never commit real secrets or certificates. Authentication uses Argon2 password hashing and bearer tokens stored through Flutter secure storage. Before launch, add verification, password recovery, session revocation, stronger abuse controls, audit logs, production-ready secrets and HTTPS. Monetary operations must use a server-side ledger and robust fraud controls.
