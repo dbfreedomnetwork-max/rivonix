@@ -16,6 +16,9 @@ import { registerLiveRoutes } from './live.js';
 import { registerSeatRoutes } from './live_seats.js';
 import { registerLiveModeration } from './live_moderation.js';
 import { registerAdminRoutes } from './admin.js';
+import { registerEconomyRoutes } from './economy.js';
+import { registerBattleRoutes } from './battles.js';
+import { registerAgencyRoutes } from './agencies.js';
 import { createReadStream } from 'node:fs';
 
 const db = new PrismaClient();
@@ -221,6 +224,9 @@ registerLiveRoutes(app, db, auth, asyncRoute);
 registerSeatRoutes(app, db, auth, asyncRoute);
 registerLiveModeration(app, db, auth, asyncRoute);
 registerAdminRoutes(app, db, auth, asyncRoute);
+registerEconomyRoutes(app, db, auth, asyncRoute);
+registerBattleRoutes(app, db, auth, asyncRoute);
+registerAgencyRoutes(app, db, auth, asyncRoute);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof multer.MulterError) { res.status(400).json({error:'Image upload rejected: '+err.code});return; }
