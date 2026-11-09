@@ -49,8 +49,8 @@ jobs:
           channel: stable
           cache: true
       # Native platform shells are not currently tracked in Git.
-      - name: Generate Android and iOS project shells
-        run: flutter create --project-name rivonix --platforms=android,ios .
+      - name: Generate Android project shell
+        run: flutter create --project-name rivonix --platforms=android .
       - name: Apply required native permissions
         run: bash ../../scripts/configure_mobile_permissions.sh
       - name: Remove unused Flutter template test
