@@ -18,6 +18,7 @@ class _LiveSeatsPanelState extends State<LiveSeatsPanel> {
   List<dynamic> seats=[];
   String? error;
   bool busy=false;
+  String? lastOwnStatus;
   @override void initState() {
     super.initState(); refresh();
     ticker=Timer.periodic(const Duration(seconds:5),(_)=>refresh());
@@ -26,7 +27,14 @@ class _LiveSeatsPanelState extends State<LiveSeatsPanel> {
   Future<void> refresh() async {
     try {
       final data=await widget.api.call('GET','/live/rooms/'+widget.roomId+'/seats') as Map<String,dynamic>;
-      if(mounted)setState((){seats=data['seats'] as List<dynamic>;error=null;});
+      if(!mounted)return;
+      final updated=data['seats'] as List<dynamic>;
+      final mine=updated.where((v)=>(v as Map<String,dynamic>)['userId']==widget.currentUserId);
+      final status=mine.isEmpty?'NONE':(mine.first as Map<String,dynamic>)['status'] as String;
+      final changed=lastOwnStatus!=null && lastOwnStatus!=status;
+      lastOwnStatus=status;
+      setState((){seats=updated;error=null;});
+      if(changed && !widget.host)await widget.onSeatChanged();
     } catch(e){if(mounted)setState(()=>error=e.toString());}
   }
   Future<void> action(String method,String endpoint,[Map<String,dynamic>? body]) async {
