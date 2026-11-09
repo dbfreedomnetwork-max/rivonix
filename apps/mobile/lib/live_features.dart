@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'main.dart';
+import 'live_seats.dart';
 
 class LiveLobby extends StatefulWidget {
   const LiveLobby({super.key, required this.api});
@@ -65,8 +66,9 @@ class LiveRoomScreen extends StatefulWidget {
 class _LiveRoomScreenState extends State<LiveRoomScreen> {
   RtcEngine? rtc;
   Timer? timer;
-  int? remoteUid;
-  bool host=false,joined=false,micMuted=false,cameraMuted=false;
+  final Set<int> remoteUids={};
+  bool host=false,guest=false,joined=false,micMuted=false,cameraMuted=false;
+  String? currentUserId;
   String? error;
   List<dynamic> messages=[];
   final message=TextEditingController();
@@ -78,7 +80,10 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     try {
       final credentials=await session();
       host=credentials['role']=='host';
-      if(host){
+      guest=credentials['role']=='guest';
+      final who=await widget.api.call('GET','/me') as Map<String,dynamic>;
+      currentUserId=who['id'] as String;
+      if(host || guest){
         if(!(await Permission.camera.request()).isGranted || !(await Permission.microphone.request()).isGranted){
           throw Exception('Camera and microphone permissions required');
         }
@@ -92,27 +97,56 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       await engine.enableVideo();
       engine.registerEventHandler(RtcEngineEventHandler(
         onJoinChannelSuccess:(_,__) {if(mounted)setState(()=>joined=true);},
-        onUserJoined:(_,uid,__) {if(mounted && !host)setState(()=>remoteUid=uid);},
-        onUserOffline:(_,uid,__) {if(mounted && remoteUid==uid)setState(()=>remoteUid=null);},
+        onUserJoined:(_,uid,__) {if(mounted)setState(()=>remoteUids.add(uid));},
+        onUserOffline:(_,uid,__) {if(mounted)setState(()=>remoteUids.remove(uid));},
         onTokenPrivilegeWillExpire:(_,__) async {
           try{final fresh=await session();await engine.renewToken(fresh['token'] as String);}
           catch(_){if(mounted)setState(()=>error='RTC token renewal failed');}
         },
         onError:(_,msg){if(mounted)setState(()=>error=msg);},
       ));
-      if(host)await engine.startPreview();
+      if(host || guest)await engine.startPreview();
       await engine.joinChannel(
         token:credentials['token'] as String,channelId:credentials['channel'] as String,
         uid:credentials['uid'] as int,
         options:ChannelMediaOptions(
-          clientRoleType:host?ClientRoleType.clientRoleBroadcaster:ClientRoleType.clientRoleAudience,
-          publishMicrophoneTrack:host,publishCameraTrack:host,
+          clientRoleType:(host || guest)?ClientRoleType.clientRoleBroadcaster:ClientRoleType.clientRoleAudience,
+          publishMicrophoneTrack:(host || guest),publishCameraTrack:(host || guest),
           autoSubscribeAudio:true,autoSubscribeVideo:true,
         ),
       );
       await loadChat();
       timer=Timer.periodic(const Duration(seconds:4),(_){loadChat();});
     }catch(e){if(mounted)setState(()=>error=e.toString());}
+  }
+  Future<void> syncSeatRole() async {
+    if(host || rtc==null || !joined)return;
+    try {
+      final updated=await session();
+      final approved=updated['role']=='guest';
+      await rtc!.renewToken(updated['token'] as String);
+      if(approved!=guest) {
+        if(approved){
+          final camera=await Permission.camera.request();
+          final microphone=await Permission.microphone.request();
+          if(!camera.isGranted || !microphone.isGranted) {
+            if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content:Text('Camera and microphone permission needed for guest seat')));
+            return;
+          }
+          await rtc!.setClientRole(role:ClientRoleType.clientRoleBroadcaster);
+          await rtc!.startPreview();
+          await rtc!.muteLocalAudioStream(false);
+          await rtc!.muteLocalVideoStream(false);
+        }else{
+          await rtc!.muteLocalAudioStream(true);
+          await rtc!.muteLocalVideoStream(true);
+          await rtc!.setClientRole(role:ClientRoleType.clientRoleAudience);
+          await rtc!.stopPreview();
+        }
+        if(mounted)setState(()=>guest=approved);
+      }
+    }catch(e){if(mounted)setState(()=>error='Guest seat sync failed: '+e.toString());}
   }
   Future<void> loadChat() async {
     try{
@@ -144,12 +178,22 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
   Widget video(){
     final engine=rtc;
     if(engine==null || !joined)return const Center(child:CircularProgressIndicator());
-    if(host)return AgoraVideoView(controller:VideoViewController(
-      rtcEngine:engine,canvas:const VideoCanvas(uid:0)));
-    if(remoteUid==null)return const Center(child:Text('Waiting for broadcaster...'));
-    return AgoraVideoView(controller:VideoViewController.remote(
-      rtcEngine:engine,canvas:VideoCanvas(uid:remoteUid!),
-      connection:RtcConnection(channelId:widget.room['channel'] as String)));
+    final streams=<Widget>[];
+    if(host || guest){
+      streams.add(AgoraVideoView(controller:VideoViewController(
+        rtcEngine:engine,canvas:const VideoCanvas(uid:0))));
+    }
+    for(final uid in remoteUids.take(9-(host||guest?1:0))){
+      streams.add(AgoraVideoView(controller:VideoViewController.remote(
+        rtcEngine:engine,canvas:VideoCanvas(uid:uid),
+        connection:RtcConnection(channelId:widget.room['channel'] as String))));
+    }
+    if(streams.isEmpty)return const Center(child:Text('Waiting for broadcaster...'));
+    final count=streams.length;
+    final columns=count<=1?1:count<=4?2:3;
+    return GridView.count(crossAxisCount:columns,childAspectRatio:0.72,
+      children:streams.map((view)=>Padding(padding:const EdgeInsets.all(2),
+        child:ClipRRect(borderRadius:BorderRadius.circular(8),child:view))).toList());
   }
   @override Widget build(BuildContext context)=>Scaffold(
     appBar:AppBar(title:Text(widget.room['title'] as String),
@@ -159,7 +203,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         video(),if(error!=null)Positioned(top:8,left:8,right:8,
           child:Text(error!,style:const TextStyle(color:Colors.redAccent))),
       ]))),
-      if(host)Row(mainAxisAlignment:MainAxisAlignment.spaceEvenly,children:[
+      if(host || guest)Row(mainAxisAlignment:MainAxisAlignment.spaceEvenly,children:[
         IconButton(onPressed:() async {
           await rtc?.muteLocalAudioStream(!micMuted);
           if(mounted)setState(()=>micMuted=!micMuted);
@@ -170,6 +214,8 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
         },icon:Icon(cameraMuted?Icons.videocam_off:Icons.videocam)),
         IconButton(onPressed:()=>rtc?.switchCamera(),icon:const Icon(Icons.flip_camera_android)),
       ]),
+      if(currentUserId!=null)LiveSeatsPanel(api:widget.api,roomId:id,host:host,
+        currentUserId:currentUserId!,onSeatChanged:syncSeatRole),
       const Padding(padding:EdgeInsets.all(6),child:Text('Chat (refreshes every 4 seconds)')),
       Expanded(flex:2,child:ListView.builder(itemCount:messages.length,itemBuilder:(ctx,i){
         final m=messages[i] as Map<String,dynamic>;final u=m['user'] as Map<String,dynamic>;
