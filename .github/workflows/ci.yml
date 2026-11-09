@@ -53,6 +53,8 @@ jobs:
         run: flutter create --project-name rivonix --platforms=android,ios .
       - name: Apply required native permissions
         run: bash ../../scripts/configure_mobile_permissions.sh
+      - name: Remove unused Flutter template test
+        run: rm -f test/widget_test.dart
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
