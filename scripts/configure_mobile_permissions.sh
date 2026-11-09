@@ -9,8 +9,8 @@ import xml.etree.ElementTree as ET
 
 manifest = Path("android/app/src/main/AndroidManifest.xml")
 plist = Path("ios/Runner/Info.plist")
-if not manifest.exists() or not plist.exists():
-    raise SystemExit("Missing Flutter native shells. Run: flutter create --platforms=android,ios .")
+if not manifest.exists():
+    raise SystemExit("Missing AndroidManifest.xml. Run: flutter create --platforms=android .")
 
 ET.register_namespace("android", "http://schemas.android.com/apk/res/android")
 tree = ET.parse(manifest)
@@ -56,18 +56,21 @@ for gradle in [Path("android/app/build.gradle.kts"), Path("android/app/build.gra
     source = source.replace("minSdkVersion flutter.minSdkVersion", "minSdkVersion 24")
     gradle.write_text(source)
 
-import plistlib
-with plist.open("rb") as source:
-    values = plistlib.load(source)
-values["CFBundleDisplayName"] = "Rivonix"
-values.setdefault("NSCameraUsageDescription",
-    "Rivonix needs camera access when you choose to broadcast LIVE.")
-values.setdefault("NSMicrophoneUsageDescription",
-    "Rivonix needs microphone access when you choose to broadcast LIVE.")
-values.setdefault("NSPhotoLibraryUsageDescription",
-    "Rivonix lets you select photos and videos to share.")
-with plist.open("wb") as target:
-    plistlib.dump(values, target)
-
-print("Android and iOS permissions configured.")
+if plist.exists():
+    import plistlib
+    with plist.open("rb") as source:
+        values = plistlib.load(source)
+    values["CFBundleDisplayName"] = "Rivonix"
+    values.setdefault("NSCameraUsageDescription",
+        "Rivonix needs camera access when you choose to broadcast LIVE.")
+    values.setdefault("NSMicrophoneUsageDescription",
+        "Rivonix needs microphone access when you choose to broadcast LIVE.")
+    values.setdefault("NSPhotoLibraryUsageDescription",
+        "Rivonix lets you select photos and videos to share.")
+    with plist.open("wb") as target:
+        plistlib.dump(values, target)
+    
+else:
+    print("iOS native shell not present (expected on Linux Android CI).")
+print("Rivonix native permissions configured.")
 PY
