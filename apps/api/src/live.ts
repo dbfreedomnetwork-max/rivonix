@@ -64,6 +64,8 @@ export function registerLiveRoutes(app: Express, db: PrismaClient, auth: Auth, a
     if (!room || room.status !== 'LIVE') {
       res.status(404).json({ error: 'LIVE room is unavailable' }); return;
     }
+    const banned=await db.liveRoomBan.findUnique({where:{roomId_userId:{roomId:room.id,userId:req.userId!}}});
+    if(banned){res.status(403).json({error:'You have been removed from this LIVE room'});return;}
     const isHost = room.hostId === req.userId!;
     let member = await db.liveParticipant.findUnique({
       where: { roomId_userId: { roomId: room.id, userId: req.userId! } },
@@ -122,6 +124,8 @@ export function registerLiveRoutes(app: Express, db: PrismaClient, auth: Auth, a
     if (!room || room.status !== 'LIVE') {
       res.status(404).json({ error: 'Room no longer LIVE' }); return;
     }
+    const banned=await db.liveRoomBan.findUnique({where:{roomId_userId:{roomId:room.id,userId:req.userId!}}});
+    if(banned){res.status(403).json({error:'You cannot chat in this room'});return;}
     const member = await db.liveParticipant.findUnique({
       where: { roomId_userId: { roomId: room.id, userId: req.userId! } },
     });
