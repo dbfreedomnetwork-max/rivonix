@@ -1,6 +1,7 @@
 import type { Express, NextFunction, Request, RequestHandler, Response } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { canBan, canModerate } from './live_policy.js';
 
 type Authed = Request & { userId?: string };
 type AsyncRoute = (handler: (req: Authed, res: Response) => Promise<void>) => RequestHandler;
@@ -22,7 +23,7 @@ export function registerLiveModeration(app: Express, db: PrismaClient, auth: Aut
   app.get('/live/rooms/:id/viewers',auth,asyncRoute(async(req,res)=>{
     const room=await db.liveRoom.findUnique({where:{id:req.params.id},select:{hostId:true,status:true}});
     if(!room || room.status!=='LIVE'){res.status(404).json({error:'Room not live'});return;}
-    if(room.hostId!==req.userId){res.status(403).json({error:'Host only'});return;}
+    if(!canModerate(room.hostId,req.userId!)){res.status(403).json({error:'Host only'});return;}
     const members=await db.liveParticipant.findMany({where:{roomId:req.params.id},
       take:100,orderBy:{joinedAt:'desc'},include:{user:{select:person}}});
     const banned=await db.liveRoomBan.findMany({where:{roomId:req.params.id},select:{userId:true}});
@@ -37,7 +38,7 @@ export function registerLiveModeration(app: Express, db: PrismaClient, auth: Aut
     const room=await db.liveRoom.findUnique({where:{id:req.params.id}});
     if(!room || room.status!=='LIVE'){res.status(404).json({error:'Room not live'});return;}
     if(room.hostId!==req.userId){res.status(403).json({error:'Host only'});return;}
-    if(input.userId===room.hostId){res.status(400).json({error:'Cannot ban host'});return;}
+    if(!canBan(room.hostId,req.userId!,input.userId)){res.status(400).json({error:'Cannot ban host'});return;}
     const member=await db.liveParticipant.findUnique({where:{roomId_userId:{roomId:room.id,userId:input.userId}}});
     if(!member){res.status(404).json({error:'Viewer not found'});return;}
     await db.$transaction([
