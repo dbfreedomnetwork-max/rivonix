@@ -4,6 +4,7 @@ import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'main.dart';
 import 'live_seats.dart';
+import 'live_moderation.dart';
 
 class LiveLobby extends StatefulWidget {
   const LiveLobby({super.key, required this.api});
@@ -66,6 +67,8 @@ class LiveRoomScreen extends StatefulWidget {
 class _LiveRoomScreenState extends State<LiveRoomScreen> {
   RtcEngine? rtc;
   Timer? timer;
+  Timer? stateTimer;
+  bool closing=false;
   final Set<int> remoteUids={};
   bool host=false,guest=false,joined=false,micMuted=false,cameraMuted=false;
   String? currentUserId;
@@ -117,6 +120,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       );
       await loadChat();
       timer=Timer.periodic(const Duration(seconds:4),(_){loadChat();});
+      stateTimer=Timer.periodic(const Duration(seconds:5),(_){checkState();});
     }catch(e){if(mounted)setState(()=>error=e.toString());}
   }
   Future<void> syncSeatRole() async {
@@ -148,6 +152,27 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       }
     }catch(e){if(mounted)setState(()=>error='Guest seat sync failed: '+e.toString());}
   }
+  Future<void> checkState() async {
+    if(closing || !joined)return;
+    try {
+      final state=await widget.api.call('GET','/live/rooms/'+id+'/state') as Map<String,dynamic>;
+      if(state['status']=='ENDED' || state['banned']==true){
+        closing=true;
+        await rtc?.muteLocalAudioStream(true);
+        await rtc?.muteLocalVideoStream(true);
+        await rtc?.leaveChannel();
+        if(mounted){
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(
+            state['banned']==true?'You were removed from this room':'LIVE has ended')));
+          Navigator.of(context).pop();
+        }
+      }else if(!host) {
+        await syncSeatRole();
+      }
+    }catch(_) {
+      // A network error is not evidence of a ban or completed broadcast.
+    }
+  }
   Future<void> loadChat() async {
     try{
       final data=await widget.api.call('GET','/live/rooms/'+id+'/messages') as Map<String,dynamic>;
@@ -170,7 +195,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
     if(mounted)Navigator.pop(context);
   }
   @override void dispose(){
-    timer?.cancel();message.dispose();
+    timer?.cancel();stateTimer?.cancel();message.dispose();
     final engine=rtc;
     if(engine!=null){engine.leaveChannel().then((_)=>engine.release());}
     super.dispose();
@@ -216,6 +241,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       ]),
       if(currentUserId!=null)LiveSeatsPanel(api:widget.api,roomId:id,host:host,
         currentUserId:currentUserId!,onSeatChanged:syncSeatRole),
+      LiveModerationPanel(api:widget.api,roomId:id,isHost:host),
       const Padding(padding:EdgeInsets.all(6),child:Text('Chat (refreshes every 4 seconds)')),
       Expanded(flex:2,child:ListView.builder(itemCount:messages.length,itemBuilder:(ctx,i){
         final m=messages[i] as Map<String,dynamic>;final u=m['user'] as Map<String,dynamic>;
