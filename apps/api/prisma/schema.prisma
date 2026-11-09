@@ -87,6 +87,8 @@ model LiveRoom {
   participants LiveParticipant[]
   messages LiveMessage[]
   guestSeats LiveGuestSeat[]
+  bans LiveRoomBan[]
+  reports LiveReport[]
   @@index([status, startedAt])
   @@index([hostId, status])
 }
@@ -134,4 +136,25 @@ model LiveGuestSeat {
   @@unique([roomId, userId])
   @@unique([roomId, seatNumber])
   @@index([roomId, status])
+}
+
+model LiveRoomBan {
+  roomId String
+  userId String
+  reason String? @db.VarChar(250)
+  createdAt DateTime @default(now())
+  room LiveRoom @relation(fields:[roomId], references:[id], onDelete:Cascade)
+  @@id([roomId,userId])
+}
+
+model LiveReport {
+  id String @id @default(cuid())
+  roomId String
+  reporterId String
+  subjectId String?
+  reason String @db.VarChar(250)
+  createdAt DateTime @default(now())
+  room LiveRoom @relation(fields:[roomId],references:[id],onDelete:Cascade)
+  @@index([roomId,createdAt])
+  @@index([subjectId,createdAt])
 }
