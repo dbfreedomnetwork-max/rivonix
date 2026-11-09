@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { registerLiveRoutes } from './live.js';
+import { registerSeatRoutes } from './live_seats.js';
 import { createReadStream } from 'node:fs';
 
 const db = new PrismaClient();
@@ -214,6 +215,7 @@ app.delete('/users/:id/follow', auth, asyncRoute(async (req,res) => {
   await db.follow.deleteMany({ where: { followerId: req.userId!, followingId: req.params.id } }); res.status(204).end();
 }));
 registerLiveRoutes(app, db, auth, asyncRoute);
+registerSeatRoutes(app, db, auth, asyncRoute);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof multer.MulterError) { res.status(400).json({error:'Image upload rejected: '+err.code});return; }
