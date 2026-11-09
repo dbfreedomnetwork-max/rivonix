@@ -6,6 +6,7 @@ import 'social_features.dart';
 import 'media_features.dart';
 import 'video_features.dart';
 import 'live_features.dart';
+import 'admin_reports.dart';
 import 'package:image_picker/image_picker.dart';
 
 const violet = Color(0xFF8B5CF6);
@@ -126,4 +127,5 @@ class _ProfileState extends State<Profile> {Map<String,dynamic>? user;String? er
      await refresh();
    } catch(e) {if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$e')));}
  },icon:const Icon(Icons.photo_camera),label:const Text('Change profile picture')),
+ if(user?['role']=='ADMIN') OutlinedButton.icon(onPressed:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>AdminReportsScreen(api:widget.api))),icon:const Icon(Icons.admin_panel_settings),label:const Text('Review LIVE reports')),
  if(user!=null) FilledButton.icon(onPressed:() async {final saved=await Navigator.of(context).push<bool>(MaterialPageRoute(builder:(_)=>EditProfileScreen(api:widget.api,profile:user!)));if(saved==true)await refresh();},icon:const Icon(Icons.edit),label:const Text('Edit profile')),OutlinedButton(onPressed:refresh,child:const Text('Refresh profile')),TextButton(onPressed:() async {await widget.api.logout();widget.onLogout();},child:const Text('Sign out'))]);}}
