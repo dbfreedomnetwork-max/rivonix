@@ -15,6 +15,7 @@ import path from 'node:path';
 import { registerLiveRoutes } from './live.js';
 import { registerSeatRoutes } from './live_seats.js';
 import { registerLiveModeration } from './live_moderation.js';
+import { registerAdminRoutes } from './admin.js';
 import { createReadStream } from 'node:fs';
 
 const db = new PrismaClient();
@@ -47,6 +48,7 @@ const auth = (req: Authed, res: Response, next: NextFunction) => {
   } catch { res.status(401).json({ error: 'Invalid or expired session' }); }
 };
 const publicUser = { id: true, username: true, displayName: true, bio: true, avatarUrl: true } as const;
+const ownUser = { ...publicUser, role: true } as const;
 const postInclude = { author: { select: publicUser }, _count: { select: { likes: true, comments: true } } } as const;
 const credentials = z.object({ email: z.string().email().max(254).transform(s => s.toLowerCase()), password: z.string().min(10).max(128) });
 const register = credentials.extend({ username: z.string().regex(/^[a-zA-Z0-9_]{3,24}$/).transform(s => s.toLowerCase()), displayName: z.string().trim().min(1).max(80) });
@@ -119,7 +121,7 @@ app.post('/auth/login', asyncRoute(async (req,res) => {
   res.json({ token: issue(user.id), user: { id: user.id, username: user.username, displayName: user.displayName, bio: user.bio, avatarUrl: user.avatarUrl } });
 }));
 app.get('/me', auth, asyncRoute(async (req,res) => {
-  const user = await db.user.findUnique({ where: { id: req.userId! }, select: publicUser });
+  const user = await db.user.findUnique({ where: { id: req.userId! }, select: ownUser });
   if (!user) { res.status(404).json({error:'Account not found'}); return; }
   res.json(user);
 }));
@@ -218,6 +220,7 @@ app.delete('/users/:id/follow', auth, asyncRoute(async (req,res) => {
 registerLiveRoutes(app, db, auth, asyncRoute);
 registerSeatRoutes(app, db, auth, asyncRoute);
 registerLiveModeration(app, db, auth, asyncRoute);
+registerAdminRoutes(app, db, auth, asyncRoute);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof multer.MulterError) { res.status(400).json({error:'Image upload rejected: '+err.code});return; }
