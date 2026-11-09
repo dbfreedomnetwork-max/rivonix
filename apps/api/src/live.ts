@@ -9,7 +9,7 @@ type AsyncRoute = (handler: (req: Authed, res: Response) => Promise<void>) => Re
 type Auth = (req: Authed, res: Response, next: NextFunction) => void;
 const hostSelect = { id: true, username: true, displayName: true, avatarUrl: true } as const;
 const roomInclude = { host: { select: hostSelect } } as const;
-const TTL_SECONDS = 3600;
+const TTL_SECONDS = 120; // Short-lived RTC privilege; revocation is not instantaneous.
 
 function agoraCredentials() {
   const appId = process.env.AGORA_APP_ID ?? '';
@@ -18,7 +18,7 @@ function agoraCredentials() {
   return { appId, cert };
 }
 
-// This API grants publishing tokens ONLY to the authenticated host.
+// Publisher tokens are restricted to host or currently approved guest seats.
 // Agora subscriber roles alone may not provide sufficient protection against
 // unauthorized publishing in every Agora configuration; enable Agora's
 // cohost/authentication controls and monitor channels before production.
@@ -74,15 +74,20 @@ export function registerLiveRoutes(app: Express, db: PrismaClient, auth: Auth, a
         data: { roomId: room.id, userId: req.userId!, agoraUid: randomInt(1, 2147483647) },
       });
     }
+    const guestSeat = isHost ? null : await db.liveGuestSeat.findUnique({
+      where:{roomId_userId:{roomId:room.id,userId:req.userId!}},
+      select:{status:true,seatNumber:true}
+    });
+    const canPublish = isHost || (guestSeat?.status === 'ACTIVE' && guestSeat.seatNumber !== null);
     const expireAt = Math.floor(Date.now() / 1000) + TTL_SECONDS;
     const rtcToken = RtcTokenBuilder.buildTokenWithUid(
       credentials.appId, credentials.cert, room.channel, member.agoraUid,
-      isHost ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER, expireAt, expireAt,
+      canPublish ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER, expireAt, expireAt,
     );
     res.json({
       appId: credentials.appId, channel: room.channel, uid: member.agoraUid,
       token: rtcToken, expiresAt: expireAt,
-      role: isHost ? 'host' : 'audience',
+      role: isHost ? 'host' : canPublish ? 'guest' : 'audience',
     });
   }));
 
