@@ -13,6 +13,8 @@ class RivoDemoHub extends StatefulWidget {
 class _RivoDemoHubState extends State<RivoDemoHub> {
   Map<String,dynamic>? wallet;
   Map<String,dynamic>? agencies;
+  Map<String,dynamic>? audit;
+  Map<String,dynamic>? creatorSummary;
   List<dynamic> ledger=[];
   String? error;
   bool busy=false;
@@ -23,12 +25,16 @@ class _RivoDemoHubState extends State<RivoDemoHub> {
       final values=await Future.wait([
         widget.api.call('GET','/rivo/wallet'),
         widget.api.call('GET','/rivo/ledger'),
-        widget.api.call('GET','/rivo/agencies/mine')
+        widget.api.call('GET','/rivo/agencies/mine'),
+        widget.api.call('GET','/rivo/wallet/reconcile'),
+        widget.api.call('GET','/rivo/creator/summary')
       ]);
       if(mounted)setState(() {
         wallet=values[0] as Map<String,dynamic>;
         ledger=(values[1] as Map<String,dynamic>)['items'] as List<dynamic>;
         agencies=values[2] as Map<String,dynamic>;
+        audit=values[3] as Map<String,dynamic>;
+        creatorSummary=values[4] as Map<String,dynamic>;
         error=null;
       });
     }catch(e){if(mounted)setState(()=>error=e.toString());}
@@ -96,6 +102,10 @@ class _RivoDemoHubState extends State<RivoDemoHub> {
           Text('Rivo Coins: '+(wallet?['coins']?.toString()??'—')),
           Text('Creator points: '+(wallet?['creatorPoints']?.toString()??'—')),
           Text('Agency points: '+(wallet?['agencyPoints']?.toString()??'—')),
+          Text('Ledger check: '+(audit?['consistent']==true?'Balanced':'Not verified / discrepancy'),
+            style:TextStyle(color:audit?['consistent']==true?Colors.greenAccent:Colors.orangeAccent)),
+          Text('Gifts received: '+(creatorSummary?['giftCount']?.toString()??'—')),
+          Text('Demo creator points earned: '+(creatorSummary?['creatorPointsEarned']?.toString()??'—')),
           const SizedBox(height:8),
           OutlinedButton(onPressed:busy?null:credit,child:const Text('Claim one-time demo coins')),
         ]))),
