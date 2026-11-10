@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Prisma } from '@prisma/client';
-import { giftLedgerBalanced, isRetryableTransactionError, sameGiftRequest, withSerializableRetry } from './economy_integrity.js';
+import { giftLedgerBalanced, isRetryableTransactionError, reconcileDemoWallet, sameGiftRequest, withSerializableRetry } from './economy_integrity.js';
 
 test('idempotency replay matches the same recipient, room and gift',()=>{
   const original={roomId:'room-one',recipientId:'creator-one',giftCode:'rose'};
@@ -47,4 +47,17 @@ test('serializable retry has a strict maximum attempt count',async()=>{
     throw new Prisma.PrismaClientKnownRequestError('conflict',{code:'P2034',clientVersion:'6.0.0'});
   },3));
   assert.equal(attempts,3);
+});
+
+test('wallet reconciliation catches missing or duplicated demo ledger entries',()=>{
+  const wallet={coins:450,creatorPoints:50,agencyPoints:15};
+  const entries=[
+    {walletType:'coins',delta:500},
+    {walletType:'coins',delta:-50},
+    {walletType:'creatorPoints',delta:50},
+    {walletType:'agencyPoints',delta:15},
+  ];
+  assert.equal(reconcileDemoWallet(wallet,entries).consistent,true);
+  assert.equal(reconcileDemoWallet({...wallet,coins:500},entries).consistent,false);
+  assert.equal(reconcileDemoWallet(wallet,entries.concat({walletType:'coins',delta:-50})).consistent,false);
 });
