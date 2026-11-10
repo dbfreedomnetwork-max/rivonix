@@ -16,5 +16,6 @@ export function splitDemoGift(coins: number, hasAgency: boolean) {
 }
 
 export function demoEconomyEnabled(env: NodeJS.ProcessEnv = process.env) {
-  return env.NODE_ENV !== 'production' && env.RIVONIX_DEMO_ECONOMY === 'true';
+  return (env.NODE_ENV === 'development' || env.NODE_ENV === 'test') &&
+    env.RIVONIX_DEMO_ECONOMY === 'true';
 }
