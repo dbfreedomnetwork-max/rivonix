@@ -32,6 +32,9 @@ export function registerBattleRoutes(app:Express,db:PrismaClient,auth:RequestHan
     }).strict().parse(req.body);
     try {
       const battle=await db.$transaction(async tx=>{
+        // Serialize same-room battle creation to prevent two concurrent active battles.
+        // Parameterized SQL uses PostgreSQL's transaction-scoped advisory lock.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${req.params.roomId}))`;
         const room=await tx.liveRoom.findUnique({where:{id:req.params.roomId}});
         if(!room || room.status!=='LIVE')throw new Error('ROOM_NOT_LIVE');
         if(room.hostId!==req.userId)throw new Error('HOST_ONLY');
@@ -40,6 +43,11 @@ export function registerBattleRoutes(app:Express,db:PrismaClient,auth:RequestHan
           where:{roomId_userId:{roomId:room.id,userId:guestId}}
         });
         if(seat?.status!=='ACTIVE')throw new Error('BAD_GUEST');
+        // Expired battles cannot block the next round.
+        await tx.rivoBattle.updateMany({
+          where:{roomId:room.id,status:'ACTIVE',endsAt:{lte:new Date()}},
+          data:{status:'ENDED',endedAt:new Date()}
+        });
         const existing=await tx.rivoBattle.findFirst({where:{roomId:room.id,status:'ACTIVE'}});
         if(existing)throw new Error('BATTLE_EXISTS');
         const now=new Date();
