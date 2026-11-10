@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math';
 import 'main.dart';
 
 /// Development-only virtual points. No coin purchases, real-money balances,
@@ -57,6 +58,24 @@ class _RivoDemoHubState extends State<RivoDemoHub> {
     }catch(e){if(mounted)setState(()=>error=e.toString());}
     finally{await Future<void>.delayed(const Duration(milliseconds:250));name.dispose();}
   }
+  Future<void> inviteCreator(String agencyId) async {
+    final controller=TextEditingController();
+    try {
+      final id=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(
+        title:const Text('Invite a creator'),
+        content:TextField(controller:controller,
+          decoration:const InputDecoration(labelText:'Creator account ID')),
+        actions:[
+          TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Cancel')),
+          FilledButton(onPressed:()=>Navigator.pop(ctx,controller.text.trim()),
+            child:const Text('Invite'))
+        ]));
+      if(id==null || id.isEmpty)return;
+      await widget.api.call('POST','/rivo/agencies/'+agencyId+'/invite',{'creatorId':id});
+      await refresh();
+    }catch(e){if(mounted)setState(()=>error=e.toString());}
+    finally{await Future<void>.delayed(const Duration(milliseconds:250));controller.dispose();}
+  }
   Future<void> accept() async {
     try{
       await widget.api.call('POST','/rivo/agencies/invitations/accept');
@@ -92,7 +111,9 @@ class _RivoDemoHubState extends State<RivoDemoHub> {
           final agency=a as Map<String,dynamic>;
           final members=agency['members'] as List<dynamic>;
           return ListTile(title:Text(agency['name'] as String),
-            subtitle:Text('Invited/active creators: '+members.length.toString()));
+            subtitle:Text('Invited/active creators: '+members.length.toString()),
+            trailing:IconButton(onPressed:()=>inviteCreator(agency['id'] as String),
+              icon:const Icon(Icons.person_add_alt_1),tooltip:'Invite creator'));
         }),
         const SizedBox(height:12),
         const Text('Virtual activity',style:TextStyle(fontSize:20,fontWeight:FontWeight.bold)),
@@ -110,10 +131,11 @@ class _RivoDemoHubState extends State<RivoDemoHub> {
 }
 
 class RivoLiveGifts extends StatefulWidget {
-  const RivoLiveGifts({super.key,required this.api,required this.roomId,required this.hostId});
+  const RivoLiveGifts({super.key,required this.api,required this.roomId,required this.hostId,required this.isHost});
   final Api api;
   final String roomId;
   final String hostId;
+  final bool isHost;
   @override State<RivoLiveGifts> createState()=>_RivoLiveGiftsState();
 }
 class _RivoLiveGiftsState extends State<RivoLiveGifts> {
@@ -127,14 +149,47 @@ class _RivoLiveGiftsState extends State<RivoLiveGifts> {
       if(mounted)setState((){battle=data['battle'] as Map<String,dynamic>?;error=null;});
     }catch(e){if(mounted)setState(()=>error=e.toString());}
   }
+  Future<void> startBattle() async {
+    try {
+      final data=await widget.api.call('GET','/live/rooms/'+widget.roomId+'/seats') as Map<String,dynamic>;
+      final guests=(data['seats'] as List<dynamic>).where((v)=>
+        (v as Map<String,dynamic>)['status']=='ACTIVE').toList();
+      if(guests.isEmpty){
+        if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content:Text('Approve a guest seat before starting a battle')));
+        return;
+      }
+      if(!mounted)return;
+      final guest=await showDialog<String>(context:context,builder:(ctx)=>SimpleDialog(
+        title:const Text('Challenge an approved guest'),
+        children:guests.map((v){
+          final seat=v as Map<String,dynamic>;
+          final creator=seat['user'] as Map<String,dynamic>;
+          return SimpleDialogOption(
+            onPressed:()=>Navigator.pop(ctx,seat['userId'] as String),
+            child:Text('@'+(creator['username'] as String))
+          );
+        }).toList()));
+      if(guest==null)return;
+      await widget.api.call('POST','/rivo/rooms/'+widget.roomId+'/battles',{
+        'guestId':guest,'durationSeconds':180
+      });
+      await refresh();
+    }catch(e){if(mounted)setState(()=>error=e.toString());}
+  }
   Future<void> send(String giftCode) async {
     if(busy)return;
     setState(()=>busy=true);
     try {
       // The user can only gift the room host from this first-phase UI.
       // Guest gifting can be added with an explicit recipient picker.
-      final id=DateTime.now().microsecondsSinceEpoch.toRadixString(16);
-      final key='00000000-0000-4000-8000-'+id.padLeft(12,'0').substring(0,12);
+      final random=Random.secure();
+      final bytes=List<int>.generate(16,(_)=>random.nextInt(256));
+      bytes[6]=(bytes[6]&0x0f)|0x40;
+      bytes[8]=(bytes[8]&0x3f)|0x80;
+      final hex=bytes.map((b)=>b.toRadixString(16).padLeft(2,'0')).join();
+      final key=hex.substring(0,8)+'-'+hex.substring(8,12)+'-'+
+        hex.substring(12,16)+'-'+hex.substring(16,20)+'-'+hex.substring(20);
       await widget.api.call('POST','/rivo/gifts',{
         'roomId':widget.roomId,'recipientId':widget.hostId,
         'giftCode':giftCode,'idempotencyKey':key
@@ -148,7 +203,11 @@ class _RivoLiveGiftsState extends State<RivoLiveGifts> {
   @override Widget build(BuildContext context)=>ExpansionTile(
     title:const Text('Battles & demo gifts'),
     children:[
+
       const Text('Virtual demonstration only — no real-money value'),
+      if(widget.isHost)OutlinedButton.icon(onPressed:startBattle,icon:const Icon(Icons.sports_mma),
+        label:const Text('Start 3-minute battle')),
+
       if(error!=null)Text(error!),
       if(battle!=null)ListTile(
         title:Text('Battle: '+(battle!['status'] as String)),
