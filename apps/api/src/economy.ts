@@ -1,8 +1,8 @@
 import type { Express, Request, RequestHandler, Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
 import { demoEconomyEnabled, GIFT_CATALOG, splitDemoGift } from './economy_policy.js';
+import { giftLedgerBalanced, sameGiftRequest, withSerializableRetry } from './economy_integrity.js';
 
 type Authed = Request & { userId?: string };
 type AsyncRoute = (handler:(req:Authed,res:Response)=>Promise<void>)=>RequestHandler;
@@ -66,7 +66,7 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
   // Unique operation ID makes retries safe.
   app.post('/rivo/demo-credit',auth,demoGuard,asyncRoute(async(req,res)=>{
     const userId=req.userId!;
-    const result=await db.$transaction(async tx=>{
+    const result=await withSerializableRetry(()=>db.$transaction(async tx=>{
       const already=await tx.rivoLedgerEntry.findUnique({
         where:{userId_walletType_operationId:{userId,walletType:'coins',operationId:'demo-onboarding-v1'}}
       });
@@ -78,7 +78,7 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
         userId,walletType:'coins',delta:500,kind:'DEMO_GRANT',operationId:'demo-onboarding-v1'
       }});
       return {credited:true};
-    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable}));
     res.json({...result,wallet:await wallet(db,userId)});
   }));
 
@@ -89,6 +89,15 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
       roomId:cuid,recipientId:cuid,giftCode,idempotencyKey:z.string().uuid()
     }).strict().parse(req.body);
     const senderId=req.userId!;
+    // A completed request is replay-safe even if the room has since ended or the
+    // sender has left. This also makes retry responses stable after network loss.
+    const replay=await db.rivoGift.findUnique({
+      where:{senderId_idempotencyKey:{senderId,idempotencyKey:input.idempotencyKey}}
+    });
+    if(replay){
+      if(!sameGiftRequest(replay,input)){res.status(409).json({error:'Idempotency key reused with different gift details'});return;}
+      res.status(200).json({gift:replay,currency:'DEMO_POINTS',replayed:true});return;
+    }
     const room=await roomMember(db,input.roomId,senderId);
     if(!room){res.status(403).json({error:'Join an active LIVE room to send a gift'});return;}
     if(senderId===input.recipientId){res.status(400).json({error:'Cannot gift yourself'});return;}
@@ -101,13 +110,12 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
     }
     const price=GIFT_CATALOG[input.giftCode].coins;
     try {
-      const gift=await db.$transaction(async tx=>{
+      const gift=await withSerializableRetry(()=>db.$transaction(async tx=>{
         const existing=await tx.rivoGift.findUnique({
           where:{senderId_idempotencyKey:{senderId,idempotencyKey:input.idempotencyKey}}
         });
         if(existing){
-          if(existing.roomId!==input.roomId || existing.recipientId!==input.recipientId ||
-             existing.giftCode!==input.giftCode) throw new Error('IDEMPOTENCY_CONFLICT');
+          if(!sameGiftRequest(existing,input)) throw new Error('IDEMPOTENCY_CONFLICT');
           return existing;
         }
         const changed=await tx.rivoWallet.updateMany({
@@ -118,6 +126,9 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
         const membership=await tx.rivoAgencyMember.findUnique({where:{creatorId:input.recipientId}});
         const agencyId=membership?.status==='ACTIVE'?membership.agencyId:null;
         const parts=splitDemoGift(price,Boolean(agencyId));
+        if(!giftLedgerBalanced({costCoins:price,creatorPoints:parts.creator,
+          agencyPoints:parts.agency,platformPoints:parts.platform}))
+          throw new Error('POINT_ALLOCATION_INVALID');
         await tx.rivoWallet.upsert({
           where:{userId:input.recipientId},
           create:{userId:input.recipientId,creatorPoints:parts.creator},
@@ -155,9 +166,22 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
             {hostScore:{increment:price}}:{guestScore:{increment:price}}
         });
         return gift;
-      },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
-      res.status(201).json({gift,currency:'DEMO_POINTS'});
+      },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable}));
+      res.status(201).json({gift,currency:'DEMO_POINTS',replayed:false});
     }catch(error){
+      // Concurrent duplicates may lose the unique-index race. The winning
+      // transaction is authoritative; return it without a second charge.
+      if(error instanceof Prisma.PrismaClientKnownRequestError && error.code==='P2002'){
+        const committed=await db.rivoGift.findUnique({
+          where:{senderId_idempotencyKey:{senderId,idempotencyKey:input.idempotencyKey}}
+        });
+        if(committed){
+          if(!sameGiftRequest(committed,input)){
+            res.status(409).json({error:'Idempotency key reused with different gift details'});return;
+          }
+          res.json({gift:committed,currency:'DEMO_POINTS',replayed:true});return;
+        }
+      }
       if(error instanceof Error && error.message==='INSUFFICIENT_COINS'){
         res.status(409).json({error:'Insufficient demo coins'});return;
       }
