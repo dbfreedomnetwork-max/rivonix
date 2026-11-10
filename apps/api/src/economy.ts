@@ -42,6 +42,26 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
     res.json({items});
   }));
 
+  app.get('/rivo/creator/summary',auth,demoGuard,asyncRoute(async(req,res)=>{
+    const userId=req.userId!;
+    const [received,membership]=await Promise.all([
+      db.rivoGift.aggregate({
+        where:{recipientId:userId},
+        _count:{_all:true},
+        _sum:{creatorPoints:true,costCoins:true}
+      }),
+      db.rivoAgencyMember.findUnique({where:{creatorId:userId},
+        include:{agency:{select:{id:true,name:true}}}})
+    ]);
+    res.json({
+      currency:'DEMO_POINTS',cashValue:null,withdrawable:false,
+      giftCount:received._count._all,
+      creatorPointsEarned:received._sum.creatorPoints??0,
+      coinValueOfGiftsReceived:received._sum.costCoins??0,
+      agency:membership?.status==='ACTIVE'?membership.agency:null
+    });
+  }));
+
   // One-time free demo credit per account. Disabled automatically in production.
   // Unique operation ID makes retries safe.
   app.post('/rivo/demo-credit',auth,demoGuard,asyncRoute(async(req,res)=>{
