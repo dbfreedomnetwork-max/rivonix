@@ -66,7 +66,9 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
   // Unique operation ID makes retries safe.
   app.post('/rivo/demo-credit',auth,demoGuard,asyncRoute(async(req,res)=>{
     const userId=req.userId!;
-    const result=await withSerializableRetry(()=>db.$transaction(async tx=>{
+    let result: {credited:boolean};
+    try {
+      result=await withSerializableRetry(()=>db.$transaction(async tx=>{
       const already=await tx.rivoLedgerEntry.findUnique({
         where:{userId_walletType_operationId:{userId,walletType:'coins',operationId:'demo-onboarding-v1'}}
       });
@@ -79,6 +81,16 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
       }});
       return {credited:true};
     },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable}));
+    } catch(error) {
+      // Concurrent onboarding requests can race on the unique operation ID.
+      // Treat the already-committed credit as a successful idempotent replay.
+      if(!(error instanceof Prisma.PrismaClientKnownRequestError && error.code==='P2002')) throw error;
+      const record=await db.rivoLedgerEntry.findUnique({
+        where:{userId_walletType_operationId:{userId,walletType:'coins',operationId:'demo-onboarding-v1'}}
+      });
+      if(!record)throw error;
+      result={credited:false};
+    }
     res.json({...result,wallet:await wallet(db,userId)});
   }));
 
