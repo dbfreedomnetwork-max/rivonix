@@ -241,7 +241,7 @@ class _LiveRoomScreenState extends State<LiveRoomScreen> {
       if(currentUserId!=null)LiveSeatsPanel(api:widget.api,roomId:id,host:host,
         currentUserId:currentUserId!,onSeatChanged:syncSeatRole),
       LiveModerationPanel(api:widget.api,roomId:id,isHost:host),
-      RivoLiveGifts(api:widget.api,roomId:id,hostId:widget.room['hostId'] as String),
+      RivoLiveGifts(api:widget.api,roomId:id,hostId:widget.room['hostId'] as String,isHost:host),
       const Padding(padding:EdgeInsets.all(6),child:Text('Chat (refreshes every 4 seconds)')),
       Expanded(flex:2,child:ListView.builder(itemCount:messages.length,itemBuilder:(ctx,i){
         final m=messages[i] as Map<String,dynamic>;final u=m['user'] as Map<String,dynamic>;
