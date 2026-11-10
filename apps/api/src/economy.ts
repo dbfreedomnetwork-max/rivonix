@@ -2,7 +2,7 @@ import type { Express, Request, RequestHandler, Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { demoEconomyEnabled, GIFT_CATALOG, splitDemoGift } from './economy_policy.js';
-import { giftLedgerBalanced, sameGiftRequest, withSerializableRetry } from './economy_integrity.js';
+import { giftLedgerBalanced, reconcileDemoWallet, sameGiftRequest, withSerializableRetry } from './economy_integrity.js';
 
 type Authed = Request & { userId?: string };
 type AsyncRoute = (handler:(req:Authed,res:Response)=>Promise<void>)=>RequestHandler;
@@ -40,6 +40,17 @@ export function registerEconomyRoutes(app:Express,db:PrismaClient,auth:RequestHa
     const items=await db.rivoLedgerEntry.findMany({where:{userId:req.userId!},take:limit,
       orderBy:{createdAt:'desc'}});
     res.json({items});
+  }));
+
+  // Read-only integrity snapshot: no mutation, purchases or payout operations.
+  app.get('/rivo/wallet/reconcile',auth,demoGuard,asyncRoute(async(req,res)=>{
+    const userId=req.userId!;
+    const balance=await wallet(db,userId);
+    const totals=await db.rivoLedgerEntry.groupBy({
+      by:['walletType'],where:{userId},_sum:{delta:true}
+    });
+    const entries=totals.map(t=>({walletType:t.walletType,delta:t._sum.delta??0}));
+    res.json({currency:'DEMO_POINTS',...reconcileDemoWallet(balance,entries)});
   }));
 
   app.get('/rivo/creator/summary',auth,demoGuard,asyncRoute(async(req,res)=>{
