@@ -2,6 +2,7 @@ import type { Express, Request, RequestHandler, Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { demoEconomyEnabled } from './economy_policy.js';
+import { withSerializableRetry } from './economy_integrity.js';
 
 type Authed=Request & {userId?:string};
 type AsyncRoute=(handler:(req:Authed,res:Response)=>Promise<void>)=>RequestHandler;
@@ -31,7 +32,7 @@ export function registerBattleRoutes(app:Express,db:PrismaClient,auth:RequestHan
       guestId:cuid,durationSeconds:z.number().int().min(60).max(300).default(180)
     }).strict().parse(req.body);
     try {
-      const battle=await db.$transaction(async tx=>{
+      const battle=await withSerializableRetry(()=>db.$transaction(async tx=>{
         // Serialize same-room battle creation to prevent two concurrent active battles.
         // Parameterized SQL uses PostgreSQL's transaction-scoped advisory lock.
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${req.params.roomId}))`;
@@ -55,7 +56,7 @@ export function registerBattleRoutes(app:Express,db:PrismaClient,auth:RequestHan
           roomId:room.id,hostId:room.hostId,guestId,
           endsAt:new Date(now.getTime()+durationSeconds*1000)
         }});
-      },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+      },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable}));
       res.status(201).json({battle});
     }catch(e){
       if(e instanceof Error && ['ROOM_NOT_LIVE','HOST_ONLY','BAD_GUEST','BATTLE_EXISTS'].includes(e.message)){
