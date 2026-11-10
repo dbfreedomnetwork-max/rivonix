@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import 'dart:async';
 import 'main.dart';
 
 /// Development-only virtual points. No coin purchases, real-money balances,
@@ -142,7 +143,12 @@ class _RivoLiveGiftsState extends State<RivoLiveGifts> {
   String? error;
   Map<String,dynamic>? battle;
   bool busy=false;
-  @override void initState(){super.initState();refresh();}
+  Timer? timer;
+  @override void initState(){
+    super.initState();refresh();
+    timer=Timer.periodic(const Duration(seconds:5),(_)=>refresh());
+  }
+  @override void dispose(){timer?.cancel();super.dispose();}
   Future<void> refresh() async {
     try {
       final data=await widget.api.call('GET','/rivo/rooms/'+widget.roomId+'/battle') as Map<String,dynamic>;
@@ -181,8 +187,25 @@ class _RivoLiveGiftsState extends State<RivoLiveGifts> {
     if(busy)return;
     setState(()=>busy=true);
     try {
-      // The user can only gift the room host from this first-phase UI.
-      // Guest gifting can be added with an explicit recipient picker.
+      // The recipient is explicitly selected: host or currently active guest.
+      final data=await widget.api.call('GET','/live/rooms/'+widget.roomId+'/seats') as Map<String,dynamic>;
+      final seats=(data['seats'] as List<dynamic>).where((v)=>
+        (v as Map<String,dynamic>)['status']=='ACTIVE').toList();
+      if(!mounted)return;
+      final recipient=await showDialog<String>(context:context,builder:(ctx)=>SimpleDialog(
+        title:const Text('Choose gift recipient'),
+        children:[
+          SimpleDialogOption(onPressed:()=>Navigator.pop(ctx,widget.hostId),
+            child:const Text('LIVE host')),
+          ...seats.map((v){
+            final seat=v as Map<String,dynamic>;
+            final creator=seat['user'] as Map<String,dynamic>;
+            return SimpleDialogOption(
+              onPressed:()=>Navigator.pop(ctx,seat['userId'] as String),
+              child:Text('@'+(creator['username'] as String)));
+          })
+        ]));
+      if(recipient==null)return;
       final random=Random.secure();
       final bytes=List<int>.generate(16,(_)=>random.nextInt(256));
       bytes[6]=(bytes[6]&0x0f)|0x40;
@@ -191,7 +214,7 @@ class _RivoLiveGiftsState extends State<RivoLiveGifts> {
       final key=hex.substring(0,8)+'-'+hex.substring(8,12)+'-'+
         hex.substring(12,16)+'-'+hex.substring(16,20)+'-'+hex.substring(20);
       await widget.api.call('POST','/rivo/gifts',{
-        'roomId':widget.roomId,'recipientId':widget.hostId,
+        'roomId':widget.roomId,'recipientId':recipient,
         'giftCode':giftCode,'idempotencyKey':key
       });
       await refresh();
