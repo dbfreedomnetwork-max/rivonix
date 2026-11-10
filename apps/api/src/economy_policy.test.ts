@@ -6,6 +6,9 @@ test('demo economy is disabled by default and always disabled in production',()=
   assert.equal(demoEconomyEnabled({NODE_ENV:'production',RIVONIX_DEMO_ECONOMY:'true'}),false);
   assert.equal(demoEconomyEnabled({NODE_ENV:'development'}),false);
   assert.equal(demoEconomyEnabled({NODE_ENV:'test',RIVONIX_DEMO_ECONOMY:'true'}),true);
+  assert.equal(demoEconomyEnabled({RIVONIX_DEMO_ECONOMY:'true'}),false);
+  assert.equal(demoEconomyEnabled({NODE_ENV:'staging',RIVONIX_DEMO_ECONOMY:'true'}),false);
+  assert.equal(demoEconomyEnabled({NODE_ENV:'development',RIVONIX_DEMO_ECONOMY:'true'}),true);
 });
 
 test('catalog costs are positive integer points',()=>{
