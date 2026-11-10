@@ -195,7 +195,7 @@ class _RivoLiveGiftsState extends State<RivoLiveGifts> {
       final recipient=await showDialog<String>(context:context,builder:(ctx)=>SimpleDialog(
         title:const Text('Choose gift recipient'),
         children:[
-          SimpleDialogOption(onPressed:()=>Navigator.pop(ctx,widget.hostId),
+          if(!widget.isHost)SimpleDialogOption(onPressed:()=>Navigator.pop(ctx,widget.hostId),
             child:const Text('LIVE host')),
           ...seats.map((v){
             final seat=v as Map<String,dynamic>;
