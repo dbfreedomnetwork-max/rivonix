@@ -18,6 +18,25 @@ export function registerAgencyRoutes(app:Express,db:PrismaClient,auth:RequestHan
       include:{agency:true}});
     res.json({owned,membership});
   }));
+  app.get('/rivo/agencies/:id/summary',auth,guard,asyncRoute(async(req,res)=>{
+    const agency=await db.rivoAgency.findUnique({where:{id:req.params.id}});
+    if(!agency){res.status(404).json({error:'Agency not found'});return;}
+    if(agency.ownerId!==req.userId){res.status(403).json({error:'Agency owner only'});return;}
+    const [gifts,members]=await Promise.all([
+      db.rivoGift.aggregate({where:{agencyId:agency.id},
+        _count:{_all:true},_sum:{agencyPoints:true}}),
+      db.rivoAgencyMember.findMany({where:{agencyId:agency.id},
+        select:{creatorId:true,status:true,joinedAt:true},take:100})
+    ]);
+    res.json({
+      agency:{id:agency.id,name:agency.name},
+      giftCount:gifts._count._all,
+      demoAgencyPoints:gifts._sum.agencyPoints??0,
+      members,
+      currency:'DEMO_POINTS',cashValue:null,withdrawable:false
+    });
+  }));
+
   app.post('/rivo/agencies',auth,guard,asyncRoute(async(req,res)=>{
     const {name}=z.object({name:z.string().trim().min(3).max(100)}).strict().parse(req.body);
     const agency=await db.rivoAgency.create({data:{ownerId:req.userId!,name}});
